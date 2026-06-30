@@ -18,6 +18,7 @@ ECOS_REGISTRY_URL=https://<owner>.github.io/<repo>/tool-registry.json
 
 - `tool-registry.json`: deployed registry consumed by ECOS Studio.
 - `examples/tool-registry.example.json`: non-empty template for tools and PDKs.
+- `.github/workflows/ci.yml`: validates registry changes on pull requests and `main`.
 - `.github/workflows/pages.yml`: validates the registry and deploys it to GitHub Pages.
 
 ## Registry Notes
@@ -32,6 +33,20 @@ ECOS_REGISTRY_URL=https://<owner>.github.io/<repo>/tool-registry.json
 - `size` is the archive size in bytes.
 - `strip_prefix` is optional and removes a top-level archive directory during extraction.
 
+## Local Validation
+
+Run the same structure and URL reachability check used by CI:
+
+```sh
+python3 .github/scripts/validate_registry.py tool-registry.json --check-urls
+```
+
+For offline editing, skip live URL checks:
+
+```sh
+python3 .github/scripts/validate_registry.py tool-registry.json
+```
+
 ## GitHub Pages Setup
 
 After initializing this folder as a GitHub repository:
@@ -39,4 +54,3 @@ After initializing this folder as a GitHub repository:
 1. Push it to GitHub.
 2. In repository settings, enable Pages with source `GitHub Actions`.
 3. Push to `main` or run the `Deploy registry to GitHub Pages` workflow manually.
-
