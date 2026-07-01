@@ -18,7 +18,8 @@
             }
           },
           "requires": [
-            "tool:ecc-fe-soc-ysyx-am"
+            "tool:ecc-fe-soc-ysyx-am",
+            "tool:ecc-fe-examples"
           ]
         }
       ]
@@ -37,6 +38,26 @@
               "url": "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-soc-ysyx-am-latest/ecc-fe-soc-ysyx-am-latest.tar.gz",
               "sha256_url": "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-soc-ysyx-am-latest/ecc-fe-soc-ysyx-am-latest.tar.gz.sha256",
               "strip_prefix": "ecc-fe-soc-ysyx-am-latest"
+            }
+          },
+          "requires": []
+        }
+      ]
+    },
+    {
+      "name": "ecc-fe-examples",
+      "display_name": "ECC-FE Examples",
+      "description": "Installable ECC-FE example CPU projects and filelists used by frontend flow demos and validation.",
+      "category": "frontend",
+      "homepage": "https://github.com/openecos-projects/ecc-fe",
+      "versions": [
+        {
+          "version": "latest",
+          "platforms": {
+            "linux-x86_64": {
+              "url": "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-examples-latest/ecc-fe-examples-latest.tar.gz",
+              "sha256_url": "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-examples-latest/ecc-fe-examples-latest.tar.gz.sha256",
+              "strip_prefix": "ecc-fe-examples-latest"
             }
           },
           "requires": []
