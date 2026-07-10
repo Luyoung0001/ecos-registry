@@ -42,9 +42,20 @@ PDK_REQUIRED_FIELDS = (
 VERSION_REQUIRED_FIELDS = ("version", "platforms")
 PLATFORM_REQUIRED_FIELDS = ("url", "sha256", "size")
 ALLOWED_PLATFORM_FIELDS = frozenset(
-    PLATFORM_REQUIRED_FIELDS + ("sha256", "size", "metadata_url", "sha256_url", "strip_prefix", "post_install")
+    PLATFORM_REQUIRED_FIELDS
+    + (
+        "sha256",
+        "size",
+        "metadata_url",
+        "sha256_url",
+        "strip_prefix",
+        "supplemental_assets",
+        "post_install",
+    )
 )
-ARCHIVE_SUFFIXES = (".tar", ".tar.gz", ".tar.xz", ".tgz", ".txz", ".zip")
+SUPPLEMENTAL_ASSET_REQUIRED_FIELDS = ("path", "url", "sha256", "size")
+ALLOWED_SUPPLEMENTAL_ASSET_FIELDS = frozenset(SUPPLEMENTAL_ASSET_REQUIRED_FIELDS)
+ARCHIVE_SUFFIXES = (".tar", ".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".txz", ".zip")
 SIDECAR_URL_SUFFIXES = (".json", ".sha256", ".txt")
 IDENTIFIER_RE = re.compile(r"^[a-z0-9_-]+$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -376,6 +387,13 @@ def _validate_platforms(
             platform["strip_prefix"]
         ):
             errors.append(f"{platform_path}.strip_prefix: must be a non-empty string")
+        if "supplemental_assets" in platform:
+            _validate_supplemental_assets(
+                platform["supplemental_assets"],
+                f"{platform_path}.supplemental_assets",
+                errors,
+                asset_urls,
+            )
         if "post_install" in platform:
             _validate_post_install(
                 platform["post_install"],
@@ -460,6 +478,74 @@ def _validate_sha256(value: object, path: str, errors: list[str]) -> None:
 def _validate_size(value: object, path: str, errors: list[str]) -> None:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         errors.append(f"{path}: must be a positive integer")
+
+
+def _validate_supplemental_assets(
+    value: object,
+    path: str,
+    errors: list[str],
+    asset_urls: list[AssetUrl],
+) -> None:
+    if not isinstance(value, list):
+        errors.append(f"{path}: must be an array")
+        return
+
+    seen_paths: dict[str, str] = {}
+    for index, asset in enumerate(value):
+        asset_path = f"{path}[{index}]"
+        if not isinstance(asset, dict):
+            errors.append(f"{asset_path}: must be an object")
+            continue
+
+        _require_fields(asset, SUPPLEMENTAL_ASSET_REQUIRED_FIELDS, asset_path, errors)
+        for field in asset:
+            if field not in ALLOWED_SUPPLEMENTAL_ASSET_FIELDS:
+                errors.append(f"{asset_path}.{field}: unknown supplemental asset field")
+
+        relative_path = asset.get("path")
+        path_error = _supplemental_asset_path_error(relative_path)
+        if path_error is not None:
+            errors.append(f"{asset_path}.path: {path_error}")
+        elif isinstance(relative_path, str):
+            if relative_path in seen_paths:
+                errors.append(
+                    f"{asset_path}.path: duplicate path {relative_path!r}; "
+                    f"first seen at {seen_paths[relative_path]}"
+                )
+            else:
+                seen_paths[relative_path] = f"{asset_path}.path"
+
+        url_path = f"{asset_path}.url"
+        if _validate_platform_url(asset.get("url"), url_path, errors):
+            asset_urls.append(AssetUrl(path=url_path, url=asset["url"]))
+        _validate_sha256(asset.get("sha256"), f"{asset_path}.sha256", errors)
+        _validate_size(asset.get("size"), f"{asset_path}.size", errors)
+
+
+def _supplemental_asset_path_error(value: object) -> str | None:
+    if not isinstance(value, str) or not value:
+        return "must be a normalized relative path"
+    if (
+        value != value.strip()
+        or "\\" in value
+        or _contains_url_control_character(value)
+        or value.startswith("/")
+        or Path(value).is_absolute()
+        or ntpath.isabs(value)
+        or ntpath.splitdrive(value)[0]
+    ):
+        return "must be a normalized relative path"
+    normalized = posixpath.normpath(value)
+    if (
+        normalized != value
+        or normalized in (".", "..")
+        or normalized.startswith("../")
+        or any(
+            not part or part in (".", "..") or ":" in part for part in value.split("/")
+        )
+    ):
+        return "must be a normalized relative path"
+    return None
 
 
 def _validate_post_install(value: object, path: str, errors: list[str]) -> None:

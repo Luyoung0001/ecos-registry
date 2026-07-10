@@ -362,6 +362,79 @@ class ValidateRegistryOfflineTests(unittest.TestCase):
             "pdks[0].versions[0].platforms.all-platform.post_install[6].cwd: must be a non-empty relative path",
         )
 
+    def test_supplemental_assets_are_locked_and_path_safe(self) -> None:
+        """Reject mutable, malformed, duplicate, or escaping supplemental assets."""
+        registry = valid_registry()
+        platform = registry["pdks"][0]["versions"][0]["platforms"]["all-platform"]
+        assert isinstance(platform, dict)
+        platform["supplemental_assets"] = [
+            "not-an-object",
+            {
+                "path": "../escape.tar.bz2",
+                "url": "ftp://example.com/escape.bin",
+                "sha256": "A" * 64,
+                "size": 0,
+                "extra": True,
+            },
+            {
+                "path": "locked/asset.tar.bz2",
+                "url": "https://example.com/asset.tar.bz2",
+                "sha256": "c" * 64,
+                "size": 123,
+            },
+            {
+                "path": "locked/asset.tar.bz2",
+                "url": "https://example.com/asset-copy.tar.bz2",
+                "sha256": "d" * 64,
+                "size": 456,
+            },
+            {"path": "missing-fields.tar.bz2"},
+        ]
+
+        errors = self.errors_for(registry)
+
+        self.assert_has_error(
+            errors,
+            "pdks[0].versions[0].platforms.all-platform.supplemental_assets[0]: must be an object",
+        )
+        self.assert_has_error(
+            errors,
+            "supplemental_assets[1].path: must be a normalized relative path",
+        )
+        self.assert_has_error(
+            errors, "supplemental_assets[1].url: must use http or https"
+        )
+        self.assert_has_error(
+            errors, "supplemental_assets[1].url: unsupported archive suffix"
+        )
+        self.assert_has_error(
+            errors,
+            "supplemental_assets[1].sha256: must be a lowercase 64-character hex string",
+        )
+        self.assert_has_error(
+            errors, "supplemental_assets[1].size: must be a positive integer"
+        )
+        self.assert_has_error(
+            errors,
+            "supplemental_assets[1].extra: unknown supplemental asset field",
+        )
+        self.assert_has_error(
+            errors,
+            "supplemental_assets[3].path: duplicate path 'locked/asset.tar.bz2'",
+        )
+        self.assert_has_error(
+            errors,
+            "supplemental_assets[4].url: missing required field",
+        )
+        self.assert_has_error(
+            errors,
+            "supplemental_assets[4].sha256: missing required field",
+        )
+        self.assert_has_error(
+            errors,
+            "supplemental_assets[4].size: missing required field",
+        )
+
 
 class FakeResponse:
     def __init__(self, status: int) -> None:
