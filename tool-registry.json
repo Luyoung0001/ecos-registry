@@ -15,8 +15,8 @@
               "url": "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-latest/ecc-fe-latest.tar.gz",
               "metadata_url": "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-latest/ecc-fe-latest.metadata.json",
               "strip_prefix": "ecc-fe-latest",
-              "sha256": "0edd6d67e4a4f1d5fbf99e769d195d92fcd517c07f342caf1a10d0bc2889ea1f",
-              "size": 157861
+              "sha256": "4ccf3d4d8f2c9ec5ff2a1f044cea2a9cc78c363905c5ae3663f2f6a1bca8d154",
+              "size": 155324
             }
           },
           "requires": [
@@ -64,8 +64,8 @@
               "url": "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-soc-ysyx-am-latest/ecc-fe-soc-ysyx-am-latest.tar.gz",
               "metadata_url": "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-soc-ysyx-am-latest/ecc-fe-soc-ysyx-am-latest.metadata.json",
               "strip_prefix": "ecc-fe-soc-ysyx-am-latest",
-              "sha256": "744b258d3f1d273ddb65de2887da3d0e86ad22d94a4f4e86b11987cba15b080e",
-              "size": 465332
+              "sha256": "d5e97a49c9fdccdc75de5a779235124d3a397a7845e8724e99daf17378a7e58b",
+              "size": 464573
             }
           },
           "requires": [
