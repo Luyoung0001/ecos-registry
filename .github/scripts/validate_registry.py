@@ -45,8 +45,6 @@ PLATFORM_REQUIRED_FIELDS = ("url", "sha256", "size")
 ALLOWED_PLATFORM_FIELDS = frozenset(
     PLATFORM_REQUIRED_FIELDS
     + (
-        "sha256",
-        "size",
         "metadata_url",
         "sha256_url",
         "strip_prefix",
