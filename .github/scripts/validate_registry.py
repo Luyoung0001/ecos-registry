@@ -40,6 +40,7 @@ PDK_REQUIRED_FIELDS = (
     "versions",
 )
 VERSION_REQUIRED_FIELDS = ("version", "platforms")
+ALLOWED_VERSION_FIELDS = frozenset(VERSION_REQUIRED_FIELDS + ("requires",))
 PLATFORM_REQUIRED_FIELDS = ("url", "sha256", "size")
 ALLOWED_PLATFORM_FIELDS = frozenset(
     PLATFORM_REQUIRED_FIELDS
@@ -58,6 +59,7 @@ ALLOWED_SUPPLEMENTAL_ASSET_FIELDS = frozenset(SUPPLEMENTAL_ASSET_REQUIRED_FIELDS
 ARCHIVE_SUFFIXES = (".tar", ".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".txz", ".zip")
 SIDECAR_URL_SUFFIXES = (".json", ".sha256", ".txt")
 IDENTIFIER_RE = re.compile(r"^[a-z0-9_-]+$")
+RESOURCE_DEPENDENCY_RE = re.compile(r"^(?:tool|pdk):[a-z0-9_-]+$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 DATE_VERSION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 NUMERIC_VERSION_RE = re.compile(r"^\d+(?:\.\d+)+$")
@@ -119,6 +121,7 @@ def validate_registry_data(
     _validate_top_level(data, errors)
     tools = _array_or_none(data.get("tools"), "tools", errors)
     pdks = _array_or_none(data.get("pdks"), "pdks", errors)
+    resource_ids = _collect_resource_ids(tools, pdks)
 
     if tools is not None:
         _validate_entries(
@@ -129,6 +132,7 @@ def validate_registry_data(
             TOOL_REQUIRED_FIELDS,
             errors,
             asset_urls,
+            resource_ids,
         )
     if pdks is not None:
         _validate_entries(
@@ -139,6 +143,7 @@ def validate_registry_data(
             PDK_REQUIRED_FIELDS,
             errors,
             asset_urls,
+            resource_ids,
         )
 
     if check_urls:
@@ -169,6 +174,24 @@ def _array_or_none(value: object, path: str, errors: list[str]) -> list[Any] | N
     return value
 
 
+def _collect_resource_ids(
+    tools: list[Any] | None,
+    pdks: list[Any] | None,
+) -> frozenset[str]:
+    resource_ids: set[str] = set()
+    for prefix, entries, id_field in (
+        ("tool", tools or [], "name"),
+        ("pdk", pdks or [], "id"),
+    ):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            identifier = entry.get(id_field)
+            if isinstance(identifier, str) and IDENTIFIER_RE.fullmatch(identifier):
+                resource_ids.add(f"{prefix}:{identifier}")
+    return frozenset(resource_ids)
+
+
 def _validate_entries(
     entries: list[Any],
     collection_path: str,
@@ -177,6 +200,7 @@ def _validate_entries(
     required_fields: tuple[str, ...],
     errors: list[str],
     asset_urls: list[AssetUrl],
+    resource_ids: frozenset[str],
 ) -> None:
     seen_ids: dict[str, str] = {}
     for index, entry in enumerate(entries):
@@ -213,6 +237,7 @@ def _validate_entries(
             entry_type="tool" if collection_path == "tools" else "pdk",
             errors=errors,
             asset_urls=asset_urls,
+            resource_ids=resource_ids,
         )
 
 
@@ -252,6 +277,7 @@ def _validate_versions(
     entry_type: str,
     errors: list[str],
     asset_urls: list[AssetUrl],
+    resource_ids: frozenset[str],
 ) -> None:
     seen_versions: dict[str, str] = {}
     version_values: list[str] = []
@@ -263,6 +289,9 @@ def _validate_versions(
             continue
 
         _require_fields(version, VERSION_REQUIRED_FIELDS, version_path, errors)
+        for field in version:
+            if field not in ALLOWED_VERSION_FIELDS:
+                errors.append(f"{version_path}.{field}: unknown version field")
         version_value = version.get("version")
         if not _is_non_empty_string(version_value):
             errors.append(f"{version_path}.version: must be a non-empty string")
@@ -276,10 +305,13 @@ def _validate_versions(
             else:
                 seen_versions[version_value] = f"{version_path}.version"
 
-        if "requires" in version and entry_type == "tool" and not isinstance(
-            version["requires"], list
-        ):
-            errors.append(f"{version_path}.requires: must be an array")
+        if "requires" in version:
+            _validate_requires(
+                version["requires"],
+                f"{version_path}.requires",
+                errors,
+                resource_ids,
+            )
 
         platforms = version.get("platforms")
         if not isinstance(platforms, dict) or not platforms:
@@ -294,6 +326,39 @@ def _validate_versions(
         )
 
     _validate_version_order(version_values, path, errors)
+
+
+def _validate_requires(
+    value: object,
+    path: str,
+    errors: list[str],
+    resource_ids: frozenset[str],
+) -> None:
+    if not isinstance(value, list):
+        errors.append(f"{path}: must be an array")
+        return
+
+    seen_dependencies: dict[str, str] = {}
+    for index, dependency in enumerate(value):
+        dependency_path = f"{path}[{index}]"
+        if not isinstance(dependency, str):
+            errors.append(f"{dependency_path}: must be a string")
+            continue
+        if not RESOURCE_DEPENDENCY_RE.fullmatch(dependency):
+            errors.append(
+                f"{dependency_path}: must match tool:<id> or pdk:<id> using "
+                "a lowercase stable identifier"
+            )
+            continue
+        if dependency in seen_dependencies:
+            errors.append(
+                f"{dependency_path}: duplicate dependency {dependency!r}; "
+                f"first seen at {seen_dependencies[dependency]}"
+            )
+        else:
+            seen_dependencies[dependency] = dependency_path
+        if dependency not in resource_ids:
+            errors.append(f"{dependency_path}: unknown resource dependency {dependency!r}")
 
 
 def _validate_version_order(

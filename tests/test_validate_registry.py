@@ -200,6 +200,55 @@ class ValidateRegistryOfflineTests(unittest.TestCase):
             "pdks[0].versions: mixed or unsupported version format",
         )
 
+    def test_requires_references_and_version_fields_are_validated(self) -> None:
+        """Reject malformed, duplicate, missing, or misspelled dependencies."""
+        registry = valid_registry()
+        tool_version = registry["tools"][0]["versions"][0]
+        pdk_version = registry["pdks"][0]["versions"][0]
+        assert isinstance(tool_version, dict)
+        assert isinstance(pdk_version, dict)
+        tool_version["requires"] = [
+            "pdk:ics55",
+            "tool:missing",
+            "yosys",
+            "pdk:BadName",
+            42,
+            "pdk:ics55",
+        ]
+        tool_version["require"] = ["tool:yosys"]
+        pdk_version["requires"] = ["tool:yosys"]
+
+        errors = self.errors_for(registry)
+
+        self.assert_has_error(
+            errors,
+            "tools[0].versions[0].requires[1]: unknown resource dependency 'tool:missing'",
+        )
+        self.assert_has_error(
+            errors,
+            "tools[0].versions[0].requires[2]: must match tool:<id> or pdk:<id>",
+        )
+        self.assert_has_error(
+            errors,
+            "tools[0].versions[0].requires[3]: must match tool:<id> or pdk:<id>",
+        )
+        self.assert_has_error(
+            errors,
+            "tools[0].versions[0].requires[4]: must be a string",
+        )
+        self.assert_has_error(
+            errors,
+            "tools[0].versions[0].requires[5]: duplicate dependency 'pdk:ics55'",
+        )
+        self.assert_has_error(
+            errors,
+            "tools[0].versions[0].require: unknown version field",
+        )
+        self.assertFalse(
+            any("pdks[0].versions[0].requires" in error for error in errors),
+            "PDK versions may depend on registered tools",
+        )
+
     def test_platform_keys_and_fields_are_validated(self) -> None:
         """Verify platform names, asset fields, and archive metadata constraints."""
         registry = valid_registry()
