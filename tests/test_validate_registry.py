@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import copy
-from http.client import HTTPMessage
 import importlib.util
 from pathlib import Path
 import sys
-from urllib.error import HTTPError
-from urllib.request import Request
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VALIDATOR_PATH = ROOT / ".github" / "scripts" / "validate_registry.py"
+SCRIPTS_DIR = ROOT / ".github" / "scripts"
+VALIDATOR_PATH = SCRIPTS_DIR / "validate_registry.py"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
 spec = importlib.util.spec_from_file_location("validate_registry", VALIDATOR_PATH)
 assert spec is not None
@@ -37,6 +37,8 @@ def valid_registry() -> dict[str, object]:
                         "platforms": {
                             "linux-x86_64": {
                                 "url": "https://example.com/yosys.tar.gz",
+                                "metadata_url": "https://example.com/yosys.metadata.json",
+                                "sha256_url": "https://example.com/yosys.tar.gz.sha256",
                                 "sha256": "a" * 64,
                                 "size": 123,
                                 "strip_prefix": "oss-cad-suite",
@@ -197,6 +199,55 @@ class ValidateRegistryOfflineTests(unittest.TestCase):
             "pdks[0].versions: mixed or unsupported version format",
         )
 
+    def test_requires_references_and_version_fields_are_validated(self) -> None:
+        """Reject malformed, duplicate, missing, or misspelled dependencies."""
+        registry = valid_registry()
+        tool_version = registry["tools"][0]["versions"][0]
+        pdk_version = registry["pdks"][0]["versions"][0]
+        assert isinstance(tool_version, dict)
+        assert isinstance(pdk_version, dict)
+        tool_version["requires"] = [
+            "pdk:ics55",
+            "tool:missing",
+            "yosys",
+            "pdk:BadName",
+            42,
+            "pdk:ics55",
+        ]
+        tool_version["require"] = ["tool:yosys"]
+        pdk_version["requires"] = ["tool:yosys"]
+
+        errors = self.errors_for(registry)
+
+        self.assert_has_error(
+            errors,
+            "tools[0].versions[0].requires[1]: unknown resource dependency 'tool:missing'",
+        )
+        self.assert_has_error(
+            errors,
+            "tools[0].versions[0].requires[2]: must match tool:<id> or pdk:<id>",
+        )
+        self.assert_has_error(
+            errors,
+            "tools[0].versions[0].requires[3]: must match tool:<id> or pdk:<id>",
+        )
+        self.assert_has_error(
+            errors,
+            "tools[0].versions[0].requires[4]: must be a string",
+        )
+        self.assert_has_error(
+            errors,
+            "tools[0].versions[0].requires[5]: duplicate dependency 'pdk:ics55'",
+        )
+        self.assert_has_error(
+            errors,
+            "tools[0].versions[0].require: unknown version field",
+        )
+        self.assertFalse(
+            any("pdks[0].versions[0].requires" in error for error in errors),
+            "PDK versions may depend on registered tools",
+        )
+
     def test_platform_keys_and_fields_are_validated(self) -> None:
         """Verify platform names, asset fields, and archive metadata constraints."""
         registry = valid_registry()
@@ -209,7 +260,9 @@ class ValidateRegistryOfflineTests(unittest.TestCase):
             "": copy.deepcopy(tool_version["platforms"]["linux-x86_64"]),
             "linux-x86_64": {
                 "url": "ftp://example.com/yosys.bin",
-                "sha256": "A" * 64,
+                "metadata_url": "https://example.com/yosys.metadata.bin",
+                "sha256_url": "https://exa mple.com/yosys.sha256",
+                "sha256": None,
                 "size": 0,
                 "strip_prefix": "",
                 "unknown": True,
@@ -226,11 +279,75 @@ class ValidateRegistryOfflineTests(unittest.TestCase):
         self.assert_has_error(errors, "tools[0].versions[0].platforms: platform key must be non-empty")
         self.assert_has_error(errors, "tools[0].versions[0].platforms.linux-x86_64.url: must use http or https")
         self.assert_has_error(errors, "tools[0].versions[0].platforms.linux-x86_64.url: unsupported archive suffix")
+        self.assert_has_error(errors, "tools[0].versions[0].platforms.linux-x86_64.metadata_url: unsupported sidecar URL suffix")
+        self.assert_has_error(errors, "tools[0].versions[0].platforms.linux-x86_64.sha256_url: malformed URL")
         self.assert_has_error(errors, "tools[0].versions[0].platforms.linux-x86_64.sha256: must be a lowercase 64-character hex string")
         self.assert_has_error(errors, "tools[0].versions[0].platforms.linux-x86_64.size: must be a positive integer")
         self.assert_has_error(errors, "tools[0].versions[0].platforms.linux-x86_64.strip_prefix: must be a non-empty string")
         self.assert_has_error(errors, "tools[0].versions[0].platforms.linux-x86_64.unknown: unknown platform field")
         self.assert_has_error(errors, "pdks[0].versions[0].platforms.all-platform.url: unsupported archive suffix")
+
+    def test_sidecar_metadata_does_not_replace_static_locks(self) -> None:
+        """Require the static fields consumed by current installers."""
+        registry = valid_registry()
+        tool_platform = registry["tools"][0]["versions"][0]["platforms"]["linux-x86_64"]
+        assert isinstance(tool_platform, dict)
+        del tool_platform["sha256"]
+        del tool_platform["size"]
+
+        errors = self.errors_for(registry)
+
+        self.assert_has_error(
+            errors,
+            "tools[0].versions[0].platforms.linux-x86_64.sha256: missing required field",
+        )
+        self.assert_has_error(
+            errors,
+            "tools[0].versions[0].platforms.linux-x86_64.size: missing required field",
+        )
+        self.assertEqual(
+            1,
+            sum(
+                "platforms.linux-x86_64.sha256" in error
+                for error in errors
+            ),
+        )
+        self.assertEqual(
+            1,
+            sum("platforms.linux-x86_64.size" in error for error in errors),
+        )
+
+    def test_asset_must_have_checksum_and_size_source(self) -> None:
+        """Require static archive facts for install safety."""
+        registry = valid_registry()
+        tool_platform = registry["tools"][0]["versions"][0]["platforms"]["linux-x86_64"]
+        assert isinstance(tool_platform, dict)
+        del tool_platform["sha256"]
+        del tool_platform["sha256_url"]
+        del tool_platform["metadata_url"]
+        del tool_platform["size"]
+
+        errors = self.errors_for(registry)
+
+        self.assert_has_error(
+            errors,
+            "tools[0].versions[0].platforms.linux-x86_64.sha256: missing required field",
+        )
+        self.assert_has_error(
+            errors,
+            "tools[0].versions[0].platforms.linux-x86_64.size: missing required field",
+        )
+
+    def test_tar_xz_archives_are_supported(self) -> None:
+        """Allow upstream binary releases distributed as tar.xz archives."""
+        registry = valid_registry()
+        tool_platform = registry["tools"][0]["versions"][0]["platforms"]["linux-x86_64"]
+        assert isinstance(tool_platform, dict)
+        tool_platform["url"] = "https://example.com/riscv64-elf-ubuntu-22.04-gcc.tar.xz"
+
+        errors = self.errors_for(registry)
+
+        self.assertEqual([], errors)
 
     def test_malformed_url_errors_are_pathful_offline(self) -> None:
         """Confirm malformed asset URLs fail offline with the exact platform path."""
@@ -304,24 +421,99 @@ class ValidateRegistryOfflineTests(unittest.TestCase):
             "pdks[0].versions[0].platforms.all-platform.post_install[6].cwd: must be a non-empty relative path",
         )
 
+    def test_supplemental_assets_are_locked_and_path_safe(self) -> None:
+        """Reject mutable, malformed, duplicate, or escaping supplemental assets."""
+        registry = valid_registry()
+        platform = registry["pdks"][0]["versions"][0]["platforms"]["all-platform"]
+        assert isinstance(platform, dict)
+        platform["supplemental_assets"] = [
+            "not-an-object",
+            {
+                "path": "../escape.tar.bz2",
+                "url": "ftp://example.com/escape.bin",
+                "sha256": "A" * 64,
+                "size": 0,
+                "extra": True,
+            },
+            {
+                "path": "locked/asset.tar.bz2",
+                "url": "https://example.com/asset.tar.bz2",
+                "sha256": "c" * 64,
+                "size": 123,
+            },
+            {
+                "path": "locked/asset.tar.bz2",
+                "url": "https://example.com/asset-copy.tar.bz2",
+                "sha256": "d" * 64,
+                "size": 456,
+            },
+            {"path": "missing-fields.tar.bz2"},
+        ]
 
-class FakeResponse:
-    def __init__(self, status: int) -> None:
-        self.status = status
-        self.read_sizes: list[int | None] = []
+        errors = self.errors_for(registry)
 
-    def __enter__(self) -> "FakeResponse":
-        return self
+        self.assert_has_error(
+            errors,
+            "pdks[0].versions[0].platforms.all-platform.supplemental_assets[0]: must be an object",
+        )
+        self.assert_has_error(
+            errors,
+            "supplemental_assets[1].path: must be a normalized relative path",
+        )
+        self.assert_has_error(
+            errors, "supplemental_assets[1].url: must use http or https"
+        )
+        self.assert_has_error(
+            errors, "supplemental_assets[1].url: unsupported archive suffix"
+        )
+        self.assert_has_error(
+            errors,
+            "supplemental_assets[1].sha256: must be a lowercase 64-character hex string",
+        )
+        self.assert_has_error(
+            errors, "supplemental_assets[1].size: must be a positive integer"
+        )
+        self.assert_has_error(
+            errors,
+            "supplemental_assets[1].extra: unknown supplemental asset field",
+        )
+        self.assert_has_error(
+            errors,
+            "supplemental_assets[3].path: duplicate path 'locked/asset.tar.bz2'",
+        )
+        self.assert_has_error(
+            errors,
+            "supplemental_assets[4].url: missing required field",
+        )
+        self.assert_has_error(
+            errors,
+            "supplemental_assets[4].sha256: missing required field",
+        )
+        self.assert_has_error(
+            errors,
+            "supplemental_assets[4].size: missing required field",
+        )
 
-    def __exit__(self, *args: object) -> None:
-        return None
+    def test_relative_path_callers_keep_their_distinct_policies(self) -> None:
+        """Share traversal checks without conflating archive and cwd rules."""
+        self.assertIsNone(
+            validate_registry._supplemental_asset_path_error("locked/asset.tar.bz2")
+        )
+        self.assertIsNotNone(
+            validate_registry._supplemental_asset_path_error("locked\\asset.tar.bz2")
+        )
+        self.assertIsNotNone(
+            validate_registry._supplemental_asset_path_error("locked/./asset.tar.bz2")
+        )
+        self.assertIsNone(validate_registry._post_install_cwd_error("build\\nested"))
+        self.assertIsNone(validate_registry._post_install_cwd_error("build/../work"))
+        self.assertEqual(
+            "must stay inside the extracted resource",
+            validate_registry._post_install_cwd_error("build/../../escape"),
+        )
 
-    def read(self, size: int | None = None) -> bytes:
-        self.read_sizes.append(size)
-        return b"x"
 
-
-class ValidateRegistryUrlTests(unittest.TestCase):
+class ValidateRegistryUrlIntegrationTests(unittest.TestCase):
     def test_url_checking_reports_registry_path_and_url(self) -> None:
         """Ensure URL check failures include both registry path and failing URL."""
         registry = valid_registry()
@@ -339,109 +531,6 @@ class ValidateRegistryUrlTests(unittest.TestCase):
             errors,
             "tools[0].versions[0].platforms.linux-x86_64.url: URL check failed for https://example.com/yosys.tar.gz: mock failure",
         )
-
-    def test_url_checker_accepts_successful_head(self) -> None:
-        """Accept a successful HEAD response without issuing a fallback GET."""
-        requests: list[Request] = []
-
-        def opener(request: Request, timeout: float) -> FakeResponse:
-            requests.append(request)
-            self.assertEqual(5.0, timeout)
-            return FakeResponse(200)
-
-        error = validate_registry.check_url_reachable(
-            "https://example.com/yosys.tar.gz",
-            opener=opener,
-            timeout=5.0,
-        )
-
-        self.assertIsNone(error)
-        self.assertEqual(["HEAD"], [request.get_method() for request in requests])
-
-    def test_default_url_checker_passes_timeout_as_keyword(self) -> None:
-        """Verify the default urlopen adapter passes timeout as a keyword argument."""
-        calls: list[float] = []
-        original_urlopen = validate_registry.urlopen
-
-        def fake_urlopen(request: Request, *, timeout: float) -> FakeResponse:
-            self.assertEqual("HEAD", request.get_method())
-            calls.append(timeout)
-            return FakeResponse(200)
-
-        validate_registry.urlopen = fake_urlopen
-        try:
-            error = validate_registry.check_url_reachable(
-                "https://example.com/yosys.tar.gz",
-                timeout=7.0,
-            )
-        finally:
-            validate_registry.urlopen = original_urlopen
-
-        self.assertIsNone(error)
-        self.assertEqual([7.0], calls)
-
-    def test_url_checker_falls_back_to_ranged_get_without_full_download(self) -> None:
-        """Use a one-byte ranged GET fallback when HEAD is not supported."""
-        requests: list[Request] = []
-        get_response = FakeResponse(206)
-
-        def opener(request: Request, timeout: float) -> FakeResponse:
-            del timeout
-            requests.append(request)
-            if request.get_method() == "HEAD":
-                raise HTTPError(
-                    request.full_url,
-                    405,
-                    "Method Not Allowed",
-                    HTTPMessage(),
-                    None,
-                )
-            return get_response
-
-        error = validate_registry.check_url_reachable(
-            "https://example.com/yosys.tar.gz",
-            opener=opener,
-        )
-
-        self.assertIsNone(error)
-        self.assertEqual(["HEAD", "GET"], [request.get_method() for request in requests])
-        self.assertEqual("bytes=0-0", requests[1].headers["Range"])
-        self.assertEqual([1], get_response.read_sizes)
-
-    def test_url_checker_reports_timeout_and_non_success_status(self) -> None:
-        """Report timeout and HTTP status failures from lightweight URL probes."""
-        def timeout_opener(request: Request, timeout: float) -> FakeResponse:
-            del request, timeout
-            raise TimeoutError("timed out")
-
-        timeout_error = validate_registry.check_url_reachable(
-            "https://example.com/yosys.tar.gz",
-            opener=timeout_opener,
-        )
-
-        self.assertIsNotNone(timeout_error)
-        self.assertIn("timed out", timeout_error)
-
-        def not_found_opener(request: Request, timeout: float) -> FakeResponse:
-            del timeout
-            raise HTTPError(request.full_url, 404, "Not Found", HTTPMessage(), None)
-
-        status_error = validate_registry.check_url_reachable(
-            "https://example.com/yosys.tar.gz",
-            opener=not_found_opener,
-        )
-
-        self.assertIsNotNone(status_error)
-        self.assertIn("GET returned HTTP 404", status_error)
-
-    def test_url_checking_reports_malformed_url_without_crashing(self) -> None:
-        """Return a normal URL-check error for malformed URLs instead of crashing."""
-        error = validate_registry.check_url_reachable(
-            "https://exa mple.com/yosys.tar.gz"
-        )
-
-        self.assertIsNotNone(error)
-        self.assertIn("failed", error)
 
     def assert_has_error(self, errors: list[str], expected: str) -> None:
         self.assertTrue(

@@ -1,0 +1,49 @@
+name: Refresh registry locks
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-registry-locks
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Refresh static asset locks
+        id: refresh
+        continue-on-error: true
+        run: python3 .github/scripts/refresh_registry_locks.py tool-registry.json
+
+      - name: Validate refreshed registry
+        run: python3 .github/scripts/validate_registry.py tool-registry.json --check-urls
+
+      - name: Commit refreshed locks
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- tool-registry.json; then
+            echo "No registry lock changes."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tool-registry.json
+          git commit -m "Refresh registry resource locks"
+          git push
+
+      - name: Report refresh failures
+        if: steps.refresh.outcome == 'failure'
+        run: |
+          echo "One or more registry locks could not be refreshed." >&2
+          exit 1
