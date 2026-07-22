@@ -12,7 +12,10 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-REFRESHER_PATH = ROOT / ".github" / "scripts" / "refresh_registry_locks.py"
+SCRIPTS_DIR = ROOT / ".github" / "scripts"
+REFRESHER_PATH = SCRIPTS_DIR / "refresh_registry_locks.py"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
 spec = importlib.util.spec_from_file_location("refresh_registry_locks", REFRESHER_PATH)
 assert spec is not None

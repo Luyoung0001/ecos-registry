@@ -14,7 +14,10 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VALIDATOR_PATH = ROOT / ".github" / "scripts" / "validate_registry.py"
+SCRIPTS_DIR = ROOT / ".github" / "scripts"
+VALIDATOR_PATH = SCRIPTS_DIR / "validate_registry.py"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
 spec = importlib.util.spec_from_file_location("validate_registry", VALIDATOR_PATH)
 assert spec is not None

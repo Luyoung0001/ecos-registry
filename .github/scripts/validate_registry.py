@@ -11,7 +11,6 @@ import json
 import ntpath
 from pathlib import Path
 import posixpath
-import re
 import socket
 import sys
 from typing import Any
@@ -21,46 +20,27 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from registry_schema import (
+    ALLOWED_PLATFORM_FIELDS,
+    ALLOWED_SUPPLEMENTAL_ASSET_FIELDS,
+    ALLOWED_TOP_LEVEL_KEYS,
+    ALLOWED_VERSION_FIELDS,
+    ARCHIVE_SUFFIXES,
+    COLLECTION_SCHEMAS,
+    DATE_VERSION_RE,
+    IDENTIFIER_RE,
+    NUMERIC_VERSION_RE,
+    PLATFORM_REQUIRED_FIELDS,
+    RESOURCE_DEPENDENCY_RE,
+    SCHEMA_VERSION,
+    SHA256_RE,
+    SIDECAR_URL_SUFFIXES,
+    SUPPLEMENTAL_ASSET_REQUIRED_FIELDS,
+    VERSION_REQUIRED_FIELDS,
+    CollectionSchema,
+)
 
-ALLOWED_TOP_LEVEL_KEYS = frozenset(("schema_version", "tools", "pdks"))
-TOOL_REQUIRED_FIELDS = (
-    "name",
-    "display_name",
-    "description",
-    "category",
-    "homepage",
-    "versions",
-)
-PDK_REQUIRED_FIELDS = (
-    "id",
-    "display_name",
-    "description",
-    "category",
-    "homepage",
-    "versions",
-)
-VERSION_REQUIRED_FIELDS = ("version", "platforms")
-ALLOWED_VERSION_FIELDS = frozenset(VERSION_REQUIRED_FIELDS + ("requires",))
-PLATFORM_REQUIRED_FIELDS = ("url", "sha256", "size")
-ALLOWED_PLATFORM_FIELDS = frozenset(
-    PLATFORM_REQUIRED_FIELDS
-    + (
-        "metadata_url",
-        "sha256_url",
-        "strip_prefix",
-        "supplemental_assets",
-        "post_install",
-    )
-)
-SUPPLEMENTAL_ASSET_REQUIRED_FIELDS = ("path", "url", "sha256", "size")
-ALLOWED_SUPPLEMENTAL_ASSET_FIELDS = frozenset(SUPPLEMENTAL_ASSET_REQUIRED_FIELDS)
-ARCHIVE_SUFFIXES = (".tar", ".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".txz", ".zip")
-SIDECAR_URL_SUFFIXES = (".json", ".sha256", ".txt")
-IDENTIFIER_RE = re.compile(r"^[a-z0-9_-]+$")
-RESOURCE_DEPENDENCY_RE = re.compile(r"^(?:tool|pdk):[a-z0-9_-]+$")
-SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-DATE_VERSION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-NUMERIC_VERSION_RE = re.compile(r"^\d+(?:\.\d+)+$")
+
 URL_TIMEOUT_SECONDS = 5.0
 _MISSING = object()
 
@@ -118,32 +98,16 @@ def validate_registry_data(
 
     asset_urls: list[AssetUrl] = []
     _validate_top_level(data, errors)
-    tools = _array_or_none(data.get("tools"), "tools", errors)
-    pdks = _array_or_none(data.get("pdks"), "pdks", errors)
-    resource_ids = _collect_resource_ids(tools, pdks)
+    collections = {
+        schema.key: _array_or_none(data.get(schema.key), schema.key, errors)
+        for schema in COLLECTION_SCHEMAS
+    }
+    resource_ids = _collect_resource_ids(collections)
 
-    if tools is not None:
-        _validate_entries(
-            tools,
-            "tools",
-            "tool",
-            "name",
-            TOOL_REQUIRED_FIELDS,
-            errors,
-            asset_urls,
-            resource_ids,
-        )
-    if pdks is not None:
-        _validate_entries(
-            pdks,
-            "pdks",
-            "PDK",
-            "id",
-            PDK_REQUIRED_FIELDS,
-            errors,
-            asset_urls,
-            resource_ids,
-        )
+    for schema in COLLECTION_SCHEMAS:
+        entries = collections[schema.key]
+        if entries is not None:
+            _validate_entries(entries, schema, errors, asset_urls, resource_ids)
 
     if check_urls:
         checker = url_checker or check_url_reachable
@@ -158,8 +122,8 @@ def validate_registry_data(
 
 
 def _validate_top_level(data: dict[str, Any], errors: list[str]) -> None:
-    if data.get("schema_version") != 2:
-        errors.append("schema_version: must equal 2")
+    if data.get("schema_version") != SCHEMA_VERSION:
+        errors.append(f"schema_version: must equal {SCHEMA_VERSION}")
 
     for key in data:
         if key not in ALLOWED_TOP_LEVEL_KEYS:
@@ -174,57 +138,55 @@ def _array_or_none(value: object, path: str, errors: list[str]) -> list[Any] | N
 
 
 def _collect_resource_ids(
-    tools: list[Any] | None,
-    pdks: list[Any] | None,
+    collections: dict[str, list[Any] | None],
 ) -> frozenset[str]:
     resource_ids: set[str] = set()
-    for prefix, entries, id_field in (
-        ("tool", tools or [], "name"),
-        ("pdk", pdks or [], "id"),
-    ):
-        for entry in entries:
+    for schema in COLLECTION_SCHEMAS:
+        for entry in collections[schema.key] or []:
             if not isinstance(entry, dict):
                 continue
-            identifier = entry.get(id_field)
+            identifier = entry.get(schema.id_field)
             if isinstance(identifier, str) and IDENTIFIER_RE.fullmatch(identifier):
-                resource_ids.add(f"{prefix}:{identifier}")
+                resource_ids.add(f"{schema.resource_type}:{identifier}")
     return frozenset(resource_ids)
 
 
 def _validate_entries(
     entries: list[Any],
-    collection_path: str,
-    label: str,
-    id_field: str,
-    required_fields: tuple[str, ...],
+    schema: CollectionSchema,
     errors: list[str],
     asset_urls: list[AssetUrl],
     resource_ids: frozenset[str],
 ) -> None:
     seen_ids: dict[str, str] = {}
     for index, entry in enumerate(entries):
-        entry_path = f"{collection_path}[{index}]"
+        entry_path = f"{schema.key}[{index}]"
         if not isinstance(entry, dict):
             errors.append(f"{entry_path}: must be an object")
             continue
 
-        _require_fields(entry, required_fields, entry_path, errors)
+        _require_fields(entry, schema.required_fields, entry_path, errors)
         _validate_string_fields(
             entry,
             ("display_name", "description", "category", "homepage"),
             entry_path,
             errors,
         )
-        _validate_identifier(entry.get(id_field), f"{entry_path}.{id_field}", errors)
-        identifier = entry.get(id_field)
+        _validate_identifier(
+            entry.get(schema.id_field),
+            f"{entry_path}.{schema.id_field}",
+            errors,
+        )
+        identifier = entry.get(schema.id_field)
         if isinstance(identifier, str) and IDENTIFIER_RE.fullmatch(identifier):
             if identifier in seen_ids:
                 errors.append(
-                    f"{entry_path}.{id_field}: duplicate {label} {id_field} "
+                    f"{entry_path}.{schema.id_field}: duplicate {schema.label} "
+                    f"{schema.id_field} "
                     f"{identifier!r}; first seen at {seen_ids[identifier]}"
                 )
             else:
-                seen_ids[identifier] = f"{entry_path}.{id_field}"
+                seen_ids[identifier] = f"{entry_path}.{schema.id_field}"
 
         versions = entry.get("versions")
         if not isinstance(versions, list) or not versions:
@@ -233,7 +195,7 @@ def _validate_entries(
         _validate_versions(
             versions,
             f"{entry_path}.versions",
-            entry_type="tool" if collection_path == "tools" else "pdk",
+            entry_type=schema.resource_type,
             errors=errors,
             asset_urls=asset_urls,
             resource_ids=resource_ids,

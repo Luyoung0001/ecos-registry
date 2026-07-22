@@ -13,6 +13,8 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from registry_schema import has_remote_lock_source, iter_registry_platforms
+
 
 SHA256_RE = re.compile(r"\b[0-9a-fA-F]{64}\b")
 URL_TIMEOUT_SECONDS = 30.0
@@ -64,48 +66,23 @@ def refresh_registry_data(
     size_fetcher = size_fetcher or fetch_url_size
     updates: list[str] = []
     failures: list[str] = []
-    for collection in ("tools", "pdks"):
-        entries = data.get(collection)
-        if not isinstance(entries, list):
+    for platform_entry in iter_registry_platforms(data):
+        platform = platform_entry.value
+        if not has_remote_lock_source(platform):
             continue
-        for entry_index, entry in enumerate(entries):
-            if not isinstance(entry, dict):
-                continue
-            versions = entry.get("versions")
-            if not isinstance(versions, list):
-                continue
-            for version_index, version in enumerate(versions):
-                if not isinstance(version, dict):
-                    continue
-                platforms = version.get("platforms")
-                if not isinstance(platforms, dict):
-                    continue
-                for platform_key, platform in platforms.items():
-                    if not isinstance(platform, dict):
-                        continue
-                    if not should_refresh_platform(platform):
-                        continue
-                    path = f"{collection}[{entry_index}].versions[{version_index}].platforms.{platform_key}"
-                    try:
-                        updates.extend(
-                            refresh_platform_lock(
-                                platform,
-                                path=path,
-                                json_fetcher=json_fetcher,
-                                text_fetcher=text_fetcher,
-                                size_fetcher=size_fetcher,
-                            )
-                        )
-                    except Exception as exc:
-                        failures.append(f"{path}: refresh failed: {exc}")
+        try:
+            updates.extend(
+                refresh_platform_lock(
+                    platform,
+                    path=platform_entry.path,
+                    json_fetcher=json_fetcher,
+                    text_fetcher=text_fetcher,
+                    size_fetcher=size_fetcher,
+                )
+            )
+        except Exception as exc:
+            failures.append(f"{platform_entry.path}: refresh failed: {exc}")
     return RefreshResult(updates=updates, failures=failures)
-
-
-def should_refresh_platform(platform: dict[str, Any]) -> bool:
-    return any(
-        isinstance(platform.get(field), str) and bool(platform[field])
-        for field in ("metadata_url", "sha256_url")
-    )
 
 
 def refresh_platform_lock(
