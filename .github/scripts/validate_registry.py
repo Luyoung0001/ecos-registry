@@ -403,40 +403,33 @@ def _validate_platforms(
 
 
 def _validate_platform_url(value: object, path: str, errors: list[str]) -> bool:
-    if not _is_non_empty_string(value):
-        errors.append(f"{path}: must be a non-empty string")
-        return False
-    if _contains_url_control_character(value):
-        errors.append(
-            f"{path}: malformed URL: must not contain whitespace or control characters"
-        )
-        return False
-
-    try:
-        parsed = urlparse(value)
-        _ = parsed.port
-        hostname = parsed.hostname
-    except ValueError as exc:
-        errors.append(f"{path}: malformed URL: {exc}")
-        return False
-
-    valid = True
-    if parsed.scheme not in ("http", "https"):
-        errors.append(f"{path}: must use http or https")
-        valid = False
-    if not parsed.netloc:
-        errors.append(f"{path}: must include a host")
-        valid = False
-    elif hostname is None:
-        errors.append(f"{path}: malformed URL: must include a valid host")
-        valid = False
-    if not parsed.path.lower().endswith(ARCHIVE_SUFFIXES):
-        errors.append(f"{path}: unsupported archive suffix")
-        valid = False
-    return valid
+    return _validate_http_url(
+        value,
+        path,
+        errors,
+        suffixes=ARCHIVE_SUFFIXES,
+        suffix_error="unsupported archive suffix",
+    )
 
 
 def _validate_sidecar_url(value: object, path: str, errors: list[str]) -> bool:
+    return _validate_http_url(
+        value,
+        path,
+        errors,
+        suffixes=SIDECAR_URL_SUFFIXES,
+        suffix_error="unsupported sidecar URL suffix",
+    )
+
+
+def _validate_http_url(
+    value: object,
+    path: str,
+    errors: list[str],
+    *,
+    suffixes: tuple[str, ...],
+    suffix_error: str,
+) -> bool:
     if not _is_non_empty_string(value):
         errors.append(f"{path}: must be a non-empty string")
         return False
@@ -464,8 +457,8 @@ def _validate_sidecar_url(value: object, path: str, errors: list[str]) -> bool:
     elif hostname is None:
         errors.append(f"{path}: malformed URL: must include a valid host")
         valid = False
-    if not parsed.path.lower().endswith(SIDECAR_URL_SUFFIXES):
-        errors.append(f"{path}: unsupported sidecar URL suffix")
+    if not parsed.path.lower().endswith(suffixes):
+        errors.append(f"{path}: {suffix_error}")
         valid = False
     return valid
 
