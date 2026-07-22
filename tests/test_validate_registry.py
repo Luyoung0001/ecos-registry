@@ -263,7 +263,7 @@ class ValidateRegistryOfflineTests(unittest.TestCase):
                 "url": "ftp://example.com/yosys.bin",
                 "metadata_url": "https://example.com/yosys.metadata.bin",
                 "sha256_url": "https://exa mple.com/yosys.sha256",
-                "sha256": "A" * 64,
+                "sha256": None,
                 "size": 0,
                 "strip_prefix": "",
                 "unknown": True,
@@ -305,6 +305,17 @@ class ValidateRegistryOfflineTests(unittest.TestCase):
         self.assert_has_error(
             errors,
             "tools[0].versions[0].platforms.linux-x86_64.size: missing required field",
+        )
+        self.assertEqual(
+            1,
+            sum(
+                "platforms.linux-x86_64.sha256" in error
+                for error in errors
+            ),
+        )
+        self.assertEqual(
+            1,
+            sum("platforms.linux-x86_64.size" in error for error in errors),
         )
 
     def test_asset_must_have_checksum_and_size_source(self) -> None:

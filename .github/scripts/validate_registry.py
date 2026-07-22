@@ -62,6 +62,7 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 DATE_VERSION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 NUMERIC_VERSION_RE = re.compile(r"^\d+(?:\.\d+)+$")
 URL_TIMEOUT_SECONDS = 5.0
+_MISSING = object()
 
 
 class NoRedirectHandler(HTTPRedirectHandler):
@@ -442,10 +443,16 @@ def _validate_platforms(
                 sidecar_path = f"{platform_path}.{field}"
                 if _validate_sidecar_url(platform.get(field), sidecar_path, errors):
                     asset_urls.append(AssetUrl(path=sidecar_path, url=platform[field]))
-        if "sha256" in platform:
-            _validate_sha256(platform.get("sha256"), f"{platform_path}.sha256", errors)
-        if "size" in platform:
-            _validate_size(platform.get("size"), f"{platform_path}.size", errors)
+        _validate_sha256(
+            platform.get("sha256", _MISSING),
+            f"{platform_path}.sha256",
+            errors,
+        )
+        _validate_size(
+            platform.get("size", _MISSING),
+            f"{platform_path}.size",
+            errors,
+        )
         if "strip_prefix" in platform and not _is_non_empty_string(
             platform["strip_prefix"]
         ):
@@ -527,11 +534,15 @@ def _validate_http_url(
 
 
 def _validate_sha256(value: object, path: str, errors: list[str]) -> None:
+    if value is _MISSING:
+        return
     if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
         errors.append(f"{path}: must be a lowercase 64-character hex string")
 
 
 def _validate_size(value: object, path: str, errors: list[str]) -> None:
+    if value is _MISSING:
+        return
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         errors.append(f"{path}: must be a positive integer")
 
@@ -574,8 +585,8 @@ def _validate_supplemental_assets(
         url_path = f"{asset_path}.url"
         if _validate_platform_url(asset.get("url"), url_path, errors):
             asset_urls.append(AssetUrl(path=url_path, url=asset["url"]))
-        _validate_sha256(asset.get("sha256"), f"{asset_path}.sha256", errors)
-        _validate_size(asset.get("size"), f"{asset_path}.size", errors)
+        _validate_sha256(asset.get("sha256", _MISSING), f"{asset_path}.sha256", errors)
+        _validate_size(asset.get("size", _MISSING), f"{asset_path}.size", errors)
 
 
 def _supplemental_asset_path_error(value: object) -> str | None:
