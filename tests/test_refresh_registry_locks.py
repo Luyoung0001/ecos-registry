@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from email.message import Message
 import importlib.util
 import json
 from pathlib import Path
 import sys
 import tempfile
+from urllib.error import HTTPError
+from urllib.request import Request
 import unittest
 
 
@@ -17,6 +20,17 @@ refresh_registry_locks = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 sys.modules[spec.name] = refresh_registry_locks
 spec.loader.exec_module(refresh_registry_locks)
+
+
+class FakeUrlResponse:
+    def __init__(self, headers: Message) -> None:
+        self.headers = headers
+
+    def __enter__(self) -> "FakeUrlResponse":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
 
 
 class RefreshRegistryLocksTests(unittest.TestCase):
@@ -196,6 +210,53 @@ class RefreshRegistryLocksTests(unittest.TestCase):
         self.assertEqual(1, len(result.failures))
         self.assertIn("linux-x86_64", result.failures[0])
         self.assertIn("temporary metadata failure", result.failures[0])
+
+    def test_fetch_url_size_falls_back_from_head_to_range_get(self) -> None:
+        cases = (
+            (405, "Content-Range", "bytes 0-0/9876", 9876),
+            (501, "Content-Length", "5432", 5432),
+        )
+        original_urlopen = refresh_registry_locks.urlopen
+        try:
+            for head_status, header_name, header_value, expected_size in cases:
+                with self.subTest(head_status=head_status, header_name=header_name):
+                    requests: list[Request] = []
+
+                    def fake_urlopen(
+                        request: Request,
+                        *,
+                        timeout: float,
+                    ) -> FakeUrlResponse:
+                        self.assertEqual(
+                            refresh_registry_locks.URL_TIMEOUT_SECONDS,
+                            timeout,
+                        )
+                        requests.append(request)
+                        if request.get_method() == "HEAD":
+                            raise HTTPError(
+                                request.full_url,
+                                head_status,
+                                "HEAD unsupported",
+                                Message(),
+                                None,
+                            )
+                        headers = Message()
+                        headers[header_name] = header_value
+                        return FakeUrlResponse(headers)
+
+                    refresh_registry_locks.urlopen = fake_urlopen
+                    size = refresh_registry_locks.fetch_url_size(
+                        "https://example.com/archive.tar.gz"
+                    )
+
+                    self.assertEqual(expected_size, size)
+                    self.assertEqual(
+                        ["HEAD", "GET"],
+                        [request.get_method() for request in requests],
+                    )
+                    self.assertEqual("bytes=0-0", requests[1].headers["Range"])
+        finally:
+            refresh_registry_locks.urlopen = original_urlopen
 
 
 if __name__ == "__main__":
