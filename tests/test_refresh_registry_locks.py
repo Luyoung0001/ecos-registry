@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 
@@ -43,14 +45,15 @@ class RefreshRegistryLocksTests(unittest.TestCase):
         def unexpected_fetch(_url: str) -> object:
             self.fail("static-only latest assets must not be fetched")
 
-        updates = refresh_registry_locks.refresh_registry_data(
+        result = refresh_registry_locks.refresh_registry_data(
             registry,
             json_fetcher=unexpected_fetch,
             text_fetcher=unexpected_fetch,
             size_fetcher=unexpected_fetch,
         )
 
-        self.assertEqual([], updates)
+        self.assertEqual([], result.updates)
+        self.assertEqual([], result.failures)
         self.assertEqual("a" * 64, platform["sha256"])
         self.assertEqual(123, platform["size"])
 
@@ -78,7 +81,7 @@ class RefreshRegistryLocksTests(unittest.TestCase):
             "pdks": [],
         }
 
-        updates = refresh_registry_locks.refresh_registry_data(
+        result = refresh_registry_locks.refresh_registry_data(
             registry,
             text_fetcher=lambda _url: f"{'b' * 64}  ecc-fe-latest.tar.gz\n",
             json_fetcher=lambda _url: {},
@@ -93,8 +96,9 @@ class RefreshRegistryLocksTests(unittest.TestCase):
                 "tools[0].versions[0].platforms.linux-x86_64.sha256 refreshed",
                 "tools[0].versions[0].platforms.linux-x86_64.size refreshed",
             ],
-            updates,
+            result.updates,
         )
+        self.assertEqual([], result.failures)
 
     def test_metadata_json_takes_precedence_over_sha_sidecar(self) -> None:
         registry = {
@@ -121,7 +125,7 @@ class RefreshRegistryLocksTests(unittest.TestCase):
             "pdks": [],
         }
 
-        updates = refresh_registry_locks.refresh_registry_data(
+        result = refresh_registry_locks.refresh_registry_data(
             registry,
             json_fetcher=lambda _url: {"sha256": "c" * 64, "size": 987},
             text_fetcher=lambda _url: f"{'b' * 64}  surfer-latest.tar.gz\n",
@@ -131,7 +135,67 @@ class RefreshRegistryLocksTests(unittest.TestCase):
         platform = registry["tools"][0]["versions"][0]["platforms"]["linux-x86_64"]
         self.assertEqual("c" * 64, platform["sha256"])
         self.assertEqual(987, platform["size"])
-        self.assertEqual(2, len(updates))
+        self.assertEqual(2, len(result.updates))
+        self.assertEqual([], result.failures)
+
+    def test_failed_platform_does_not_block_successful_updates(self) -> None:
+        failed_platform = {
+            "url": "https://example.com/failed.tar.gz",
+            "metadata_url": "https://example.com/failed.json",
+            "sha256": "a" * 64,
+            "size": 1,
+        }
+        successful_platform = {
+            "url": "https://example.com/successful.tar.gz",
+            "metadata_url": "https://example.com/successful.json",
+            "sha256": "b" * 64,
+            "size": 2,
+        }
+        registry = {
+            "schema_version": 2,
+            "tools": [
+                {
+                    "name": "multi-platform",
+                    "versions": [
+                        {
+                            "version": "latest",
+                            "platforms": {
+                                "linux-x86_64": failed_platform,
+                                "linux-arm64": successful_platform,
+                            },
+                        }
+                    ],
+                }
+            ],
+            "pdks": [],
+        }
+
+        def fetch_metadata(url: str) -> dict[str, object]:
+            if url.endswith("failed.json"):
+                raise RuntimeError("temporary metadata failure")
+            return {"sha256": "c" * 64, "size": 300}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            registry_path = Path(temp_dir) / "tool-registry.json"
+            registry_path.write_text(json.dumps(registry), encoding="utf-8")
+
+            result = refresh_registry_locks.refresh_registry_file(
+                registry_path,
+                json_fetcher=fetch_metadata,
+                text_fetcher=lambda _url: "",
+                size_fetcher=lambda _url: 0,
+            )
+            written = json.loads(registry_path.read_text(encoding="utf-8"))
+
+        written_platforms = written["tools"][0]["versions"][0]["platforms"]
+        self.assertEqual("a" * 64, written_platforms["linux-x86_64"]["sha256"])
+        self.assertEqual(1, written_platforms["linux-x86_64"]["size"])
+        self.assertEqual("c" * 64, written_platforms["linux-arm64"]["sha256"])
+        self.assertEqual(300, written_platforms["linux-arm64"]["size"])
+        self.assertEqual(2, len(result.updates))
+        self.assertEqual(1, len(result.failures))
+        self.assertIn("linux-x86_64", result.failures[0])
+        self.assertIn("temporary metadata failure", result.failures[0])
 
 
 if __name__ == "__main__":

@@ -20,6 +20,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Refresh static asset locks
+        id: refresh
+        continue-on-error: true
         run: python3 .github/scripts/refresh_registry_locks.py tool-registry.json
 
       - name: Validate refreshed registry
@@ -39,3 +41,9 @@ jobs:
           git add tool-registry.json
           git commit -m "Refresh registry resource locks"
           git push
+
+      - name: Report refresh failures
+        if: steps.refresh.outcome == 'failure'
+        run: |
+          echo "One or more registry locks could not be refreshed." >&2
+          exit 1

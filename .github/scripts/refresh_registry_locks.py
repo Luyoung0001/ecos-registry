@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
+import sys
 from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -20,15 +22,34 @@ TextFetcher = Callable[[str], str]
 SizeFetcher = Callable[[str], int]
 
 
-def refresh_registry_file(path: Path) -> int:
+@dataclass
+class RefreshResult:
+    updates: list[str]
+    failures: list[str]
+
+
+def refresh_registry_file(
+    path: Path,
+    *,
+    json_fetcher: JsonFetcher | None = None,
+    text_fetcher: TextFetcher | None = None,
+    size_fetcher: SizeFetcher | None = None,
+) -> RefreshResult:
     data = json.loads(path.read_text(encoding="utf-8"))
-    updates = refresh_registry_data(data)
-    if updates:
+    result = refresh_registry_data(
+        data,
+        json_fetcher=json_fetcher,
+        text_fetcher=text_fetcher,
+        size_fetcher=size_fetcher,
+    )
+    if result.updates:
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    for update in updates:
+    for update in result.updates:
         print(update)
-    print(f"refreshed {len(updates)} platform lock field set(s)")
-    return len(updates)
+    for failure in result.failures:
+        print(failure, file=sys.stderr)
+    print(f"refreshed {len(result.updates)} platform lock field set(s)")
+    return result
 
 
 def refresh_registry_data(
@@ -37,11 +58,12 @@ def refresh_registry_data(
     json_fetcher: JsonFetcher | None = None,
     text_fetcher: TextFetcher | None = None,
     size_fetcher: SizeFetcher | None = None,
-) -> list[str]:
+) -> RefreshResult:
     json_fetcher = json_fetcher or fetch_json_url
     text_fetcher = text_fetcher or fetch_text_url
     size_fetcher = size_fetcher or fetch_url_size
     updates: list[str] = []
+    failures: list[str] = []
     for collection in ("tools", "pdks"):
         entries = data.get(collection)
         if not isinstance(entries, list):
@@ -64,16 +86,19 @@ def refresh_registry_data(
                     if not should_refresh_platform(platform):
                         continue
                     path = f"{collection}[{entry_index}].versions[{version_index}].platforms.{platform_key}"
-                    updates.extend(
-                        refresh_platform_lock(
-                            platform,
-                            path=path,
-                            json_fetcher=json_fetcher,
-                            text_fetcher=text_fetcher,
-                            size_fetcher=size_fetcher,
+                    try:
+                        updates.extend(
+                            refresh_platform_lock(
+                                platform,
+                                path=path,
+                                json_fetcher=json_fetcher,
+                                text_fetcher=text_fetcher,
+                                size_fetcher=size_fetcher,
+                            )
                         )
-                    )
-    return updates
+                    except Exception as exc:
+                        failures.append(f"{path}: refresh failed: {exc}")
+    return RefreshResult(updates=updates, failures=failures)
 
 
 def should_refresh_platform(platform: dict[str, Any]) -> bool:
@@ -175,8 +200,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Refresh static sha256/size lock fields in tool-registry.json")
     parser.add_argument("registry", nargs="?", default="tool-registry.json", type=Path)
     args = parser.parse_args()
-    refresh_registry_file(args.registry)
-    return 0
+    result = refresh_registry_file(args.registry)
+    return 1 if result.failures else 0
 
 
 if __name__ == "__main__":
