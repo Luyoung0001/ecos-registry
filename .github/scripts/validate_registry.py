@@ -524,27 +524,7 @@ def _validate_supplemental_assets(
 
 
 def _supplemental_asset_path_error(value: object) -> str | None:
-    if not isinstance(value, str) or not value:
-        return "must be a normalized relative path"
-    if (
-        value != value.strip()
-        or "\\" in value
-        or _contains_url_control_character(value)
-        or value.startswith("/")
-        or Path(value).is_absolute()
-        or ntpath.isabs(value)
-        or ntpath.splitdrive(value)[0]
-    ):
-        return "must be a normalized relative path"
-    normalized = posixpath.normpath(value)
-    if (
-        normalized != value
-        or normalized in (".", "..")
-        or normalized.startswith("../")
-        or any(
-            not part or part in (".", "..") or ":" in part for part in value.split("/")
-        )
-    ):
+    if _relative_path_issue(value, require_normalized=True) is not None:
         return "must be a normalized relative path"
     return None
 
@@ -590,18 +570,46 @@ def _contains_url_control_character(value: str) -> bool:
 
 
 def _post_install_cwd_error(value: object) -> str | None:
-    if not isinstance(value, str) or not value:
+    issue = _relative_path_issue(value, require_normalized=False)
+    if issue == "escapes":
+        return "must stay inside the extracted resource"
+    if issue is not None:
         return "must be a non-empty relative path"
+    return None
+
+
+def _relative_path_issue(
+    value: object,
+    *,
+    require_normalized: bool,
+) -> str | None:
+    if not isinstance(value, str) or not value:
+        return "invalid"
+    if require_normalized and (
+        value != value.strip()
+        or "\\" in value
+        or _contains_url_control_character(value)
+    ):
+        return "invalid"
     if (
         value.startswith(("/", "\\"))
         or Path(value).is_absolute()
         or ntpath.isabs(value)
         or ntpath.splitdrive(value)[0]
     ):
-        return "must be a non-empty relative path"
-    normalized = posixpath.normpath(value.replace("\\", "/"))
+        return "invalid"
+    portable_value = value if require_normalized else value.replace("\\", "/")
+    normalized = posixpath.normpath(portable_value)
     if normalized == ".." or normalized.startswith("../"):
-        return "must stay inside the extracted resource"
+        return "escapes"
+    if require_normalized and (
+        normalized != value
+        or normalized == "."
+        or any(
+            not part or part in (".", "..") or ":" in part for part in value.split("/")
+        )
+    ):
+        return "invalid"
     return None
 
 

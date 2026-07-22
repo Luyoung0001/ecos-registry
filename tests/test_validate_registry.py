@@ -494,6 +494,24 @@ class ValidateRegistryOfflineTests(unittest.TestCase):
             "supplemental_assets[4].size: missing required field",
         )
 
+    def test_relative_path_callers_keep_their_distinct_policies(self) -> None:
+        """Share traversal checks without conflating archive and cwd rules."""
+        self.assertIsNone(
+            validate_registry._supplemental_asset_path_error("locked/asset.tar.bz2")
+        )
+        self.assertIsNotNone(
+            validate_registry._supplemental_asset_path_error("locked\\asset.tar.bz2")
+        )
+        self.assertIsNotNone(
+            validate_registry._supplemental_asset_path_error("locked/./asset.tar.bz2")
+        )
+        self.assertIsNone(validate_registry._post_install_cwd_error("build\\nested"))
+        self.assertIsNone(validate_registry._post_install_cwd_error("build/../work"))
+        self.assertEqual(
+            "must stay inside the extracted resource",
+            validate_registry._post_install_cwd_error("build/../../escape"),
+        )
+
 
 class ValidateRegistryUrlIntegrationTests(unittest.TestCase):
     def test_url_checking_reports_registry_path_and_url(self) -> None:
