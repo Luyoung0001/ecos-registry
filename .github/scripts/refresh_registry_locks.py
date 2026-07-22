@@ -118,8 +118,8 @@ def refresh_platform_lock(
 ) -> list[str]:
     updates: list[str] = []
     metadata = fetch_metadata(platform, json_fetcher)
-    sha256 = metadata.get("sha256") if metadata else None
-    size = metadata.get("size") if metadata else None
+    sha256 = metadata.get("sha256")
+    size = metadata.get("size")
 
     if not isinstance(sha256, str):
         sha256_url = platform.get("sha256_url")
