@@ -3,9 +3,11 @@ from __future__ import annotations
 import copy
 from email.message import Message
 from http.client import HTTPMessage
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
 from pathlib import Path
 import sys
+from threading import Thread
 from urllib.error import HTTPError
 from urllib.request import Request
 import unittest
@@ -618,6 +620,33 @@ class ValidateRegistryUrlTests(unittest.TestCase):
             "https://example.com/yosys.tar.gz",
             opener=opener,
         )
+
+        self.assertIsNone(error)
+
+    def test_real_no_redirect_opener_accepts_redirect_with_location(self) -> None:
+        """Exercise the real no-redirect opener against a local HTTP server."""
+
+        class RedirectHandler(BaseHTTPRequestHandler):
+            def do_HEAD(self) -> None:
+                self.send_response(302)
+                self.send_header("Location", "https://downloads.example.com/asset.tar.gz")
+                self.end_headers()
+
+            def log_message(self, format: str, *args: object) -> None:
+                del format, args
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            host, port = server.server_address
+            error = validate_registry.check_url_reachable(
+                f"http://{host}:{port}/asset.tar.gz"
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
 
         self.assertIsNone(error)
 
