@@ -61,7 +61,7 @@ def refresh_registry_data(
                 for platform_key, platform in platforms.items():
                     if not isinstance(platform, dict):
                         continue
-                    if not should_refresh_platform(version, platform):
+                    if not should_refresh_platform(platform):
                         continue
                     path = f"{collection}[{entry_index}].versions[{version_index}].platforms.{platform_key}"
                     updates.extend(
@@ -76,11 +76,10 @@ def refresh_registry_data(
     return updates
 
 
-def should_refresh_platform(version: dict[str, Any], platform: dict[str, Any]) -> bool:
-    return (
-        version.get("version") == "latest"
-        or isinstance(platform.get("sha256_url"), str)
-        or isinstance(platform.get("metadata_url"), str)
+def should_refresh_platform(platform: dict[str, Any]) -> bool:
+    return any(
+        isinstance(platform.get(field), str) and bool(platform[field])
+        for field in ("metadata_url", "sha256_url")
     )
 
 

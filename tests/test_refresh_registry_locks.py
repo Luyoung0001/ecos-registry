@@ -18,6 +18,42 @@ spec.loader.exec_module(refresh_registry_locks)
 
 
 class RefreshRegistryLocksTests(unittest.TestCase):
+    def test_skips_latest_asset_without_remote_checksum_source(self) -> None:
+        platform = {
+            "url": "https://example.com/static-latest.tar.gz",
+            "sha256": "a" * 64,
+            "size": 123,
+        }
+        registry = {
+            "schema_version": 2,
+            "tools": [
+                {
+                    "name": "static-latest",
+                    "versions": [
+                        {
+                            "version": "latest",
+                            "platforms": {"linux-x86_64": platform},
+                        }
+                    ],
+                }
+            ],
+            "pdks": [],
+        }
+
+        def unexpected_fetch(_url: str) -> object:
+            self.fail("static-only latest assets must not be fetched")
+
+        updates = refresh_registry_locks.refresh_registry_data(
+            registry,
+            json_fetcher=unexpected_fetch,
+            text_fetcher=unexpected_fetch,
+            size_fetcher=unexpected_fetch,
+        )
+
+        self.assertEqual([], updates)
+        self.assertEqual("a" * 64, platform["sha256"])
+        self.assertEqual(123, platform["size"])
+
     def test_refreshes_latest_sidecar_asset_static_sha256_and_size(self) -> None:
         registry = {
             "schema_version": 2,
