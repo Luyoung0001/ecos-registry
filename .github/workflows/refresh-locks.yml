@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
 
 concurrency:
@@ -28,11 +29,13 @@ jobs:
         run: python3 .github/scripts/validate_registry.py tool-registry.json --check-urls
 
       - name: Commit refreshed locks
+        id: commit
         shell: bash
         run: |
           set -euo pipefail
           if git diff --quiet -- tool-registry.json; then
             echo "No registry lock changes."
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
@@ -41,6 +44,14 @@ jobs:
           git add tool-registry.json
           git commit -m "Refresh registry resource locks"
           git push
+          echo "changed=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Deploy refreshed registry
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref "${DEFAULT_BRANCH}"
 
       - name: Report refresh failures
         if: steps.refresh.outcome == 'failure'
