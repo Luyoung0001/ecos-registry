@@ -161,6 +161,27 @@
       ]
     },
     {
+      "name": "verilator",
+      "display_name": "Verilator",
+      "description": "Pinned Verilator 5.050 SystemVerilog simulator used by ECC-FE Lint and Sim flows.",
+      "category": "simulation",
+      "homepage": "https://github.com/verilator/verilator",
+      "versions": [
+        {
+          "version": "5.050",
+          "platforms": {
+            "linux-x86_64": {
+              "url": "https://github.com/openecos-projects/ecos-resource-assets/releases/download/verilator-v5.050/verilator-v5.050-linux-x86_64.tar.gz",
+              "sha256": "d0f622e00fec777c84e616eea69a1689b552534487d642107c646b05b7d46d52",
+              "size": 6413405,
+              "strip_prefix": "verilator-v5.050-linux-x86_64"
+            }
+          },
+          "requires": []
+        }
+      ]
+    },
+    {
       "name": "riscv-toolchain",
       "display_name": "RISC-V GNU Toolchain",
       "description": "RISC-V GNU bare-metal GCC toolchain used to build CPU tests, RT-Thread images, and CoreMark programs.",

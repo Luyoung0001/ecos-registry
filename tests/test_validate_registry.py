@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import json
 from pathlib import Path
 import sys
 import unittest
@@ -95,6 +96,27 @@ class ValidateRegistryOfflineTests(unittest.TestCase):
         errors = validate_registry.validate_registry(ROOT / "tool-registry.json")
 
         self.assertEqual([], errors)
+
+    def test_verilator_registry_entry_remains_pinned_to_v5050(self) -> None:
+        """Prevent automated or incidental upgrades of the fixed Verilator resource."""
+        registry = json.loads((ROOT / "tool-registry.json").read_text(encoding="utf-8"))
+        verilator = next(tool for tool in registry["tools"] if tool["name"] == "verilator")
+
+        self.assertEqual(["5.050"], [item["version"] for item in verilator["versions"]])
+        platform = verilator["versions"][0]["platforms"]["linux-x86_64"]
+        self.assertEqual(
+            "https://github.com/openecos-projects/ecos-resource-assets/releases/download/"
+            "verilator-v5.050/verilator-v5.050-linux-x86_64.tar.gz",
+            platform["url"],
+        )
+        self.assertEqual(
+            "d0f622e00fec777c84e616eea69a1689b552534487d642107c646b05b7d46d52",
+            platform["sha256"],
+        )
+        self.assertEqual(6413405, platform["size"])
+        self.assertEqual("verilator-v5.050-linux-x86_64", platform["strip_prefix"])
+        self.assertNotIn("metadata_url", platform)
+        self.assertNotIn("sha256_url", platform)
 
     def test_invalid_json_shape_reports_pathful_errors(self) -> None:
         """Verify top-level JSON shape errors include actionable registry paths."""
