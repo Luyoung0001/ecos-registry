@@ -23,7 +23,10 @@
             "tool:ecc-fe-cpu-rtl",
             "tool:ecc-fe-soc-ysyx-am",
             "tool:ecc-fe-difftest-ref",
-            "tool:ecc-fe-examples"
+            "tool:ecc-fe-examples",
+            "tool:slang",
+            "tool:verilator",
+            "tool:riscv-toolchain"
           ]
         }
       ]
@@ -31,7 +34,7 @@
     {
       "name": "ecc-fe-cpu-rtl",
       "display_name": "ECC-FE CPU RTL Resources",
-      "description": "Installable ECC-FE third-party CPU RTL snapshots and RT-Thread AM support files used by frontend simulation adapters.",
+      "description": "Installable ECC-FE third-party CPU RTL snapshots used by frontend simulation adapters.",
       "category": "frontend",
       "homepage": "https://github.com/openecos-projects/ecc-fe",
       "versions": [
@@ -53,7 +56,7 @@
     {
       "name": "ecc-fe-soc-ysyx-am",
       "display_name": "ECC-FE YSYX AM SoC Harness",
-      "description": "Installable SoC harness resource used by ECC-FE simulation flows for CPU tests, RT-Thread, and CoreMark.",
+      "description": "Installable SoC harness resource used by ECC-FE simulation flows for CPU tests and CoreMark.",
       "category": "frontend",
       "homepage": "https://github.com/openecos-projects/ecc-fe",
       "versions": [
@@ -183,8 +186,8 @@
     },
     {
       "name": "riscv-toolchain",
-      "display_name": "RISC-V GNU Toolchain",
-      "description": "RISC-V GNU bare-metal GCC toolchain used to build CPU tests, RT-Thread images, and CoreMark programs.",
+      "display_name": "RISC-V GCC & Binutils Toolchain",
+      "description": "Pinned RISC-V GNU bare-metal toolchain providing GCC, LD, objdump, and objcopy for CPU tests, CoreMark, ELF binaries, and source-aware disassembly.",
       "category": "toolchain",
       "homepage": "https://github.com/riscv-collab/riscv-gnu-toolchain",
       "versions": [
